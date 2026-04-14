@@ -354,7 +354,9 @@ export default function Index() {
                       нет параметров
                     </div>
                   )}
-                  {currentSection.params.map(param => (
+                  {currentSection.params.map(param => {
+                    const isUncPath = param.value.startsWith('\\\\');
+                    return (
                     <div
                       key={param.id}
                       className="grid grid-cols-[1fr_1fr_1fr_32px] px-4 border-b border-border/40 hover:bg-muted/20 group transition-colors"
@@ -366,13 +368,27 @@ export default function Index() {
                         className="bg-transparent text-sm text-foreground py-2 pr-3 focus:outline-none placeholder:text-muted-foreground/30 w-full"
                         style={{ fontFamily: "'IBM Plex Mono', monospace" }}
                       />
-                      <input
-                        value={param.value}
-                        onChange={e => updateParam(currentSection.id, param.id, 'value', e.target.value)}
-                        placeholder="value"
-                        className="bg-transparent text-sm text-primary py-2 px-3 border-l border-border/50 focus:outline-none placeholder:text-muted-foreground/30 w-full"
-                        style={{ fontFamily: "'IBM Plex Mono', monospace" }}
-                      />
+                      <div className="flex items-center border-l border-border/50 px-3 gap-1.5 min-w-0">
+                        <input
+                          value={param.value}
+                          onChange={e => updateParam(currentSection.id, param.id, 'value', e.target.value)}
+                          placeholder="value"
+                          className="bg-transparent text-sm text-primary py-2 focus:outline-none placeholder:text-muted-foreground/30 w-full min-w-0"
+                          style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                        />
+                        {isUncPath && (
+                          <button
+                            title={`Открыть в проводнике: ${param.value}`}
+                            onClick={() => {
+                              const path = param.value.replace(/\\/g, '/');
+                              window.open(`file://${path}`, '_blank');
+                            }}
+                            className="shrink-0 flex items-center justify-center w-5 h-5 text-muted-foreground hover:text-primary transition-colors"
+                          >
+                            <Icon name="FolderOpen" size={13} />
+                          </button>
+                        )}
+                      </div>
                       <input
                         value={param.comment}
                         onChange={e => updateParam(currentSection.id, param.id, 'comment', e.target.value)}
@@ -387,7 +403,8 @@ export default function Index() {
                         <Icon name="Trash2" size={12} />
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Add param */}
