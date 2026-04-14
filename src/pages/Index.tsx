@@ -1,5 +1,26 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
+
+const TEMPLATES_URL = 'https://functions.poehali.dev/2f365c09-35a6-4325-a6e2-65c8da049559';
+
+interface TemplateParam {
+  id: number;
+  comment: string;
+  key: string;
+  value: string;
+}
+
+interface TemplateSection {
+  id: number;
+  name: string;
+  params: TemplateParam[];
+}
+
+interface Template {
+  id: number;
+  name: string;
+  sections: TemplateSection[];
+}
 
 interface IniParam {
   id: string;
@@ -79,6 +100,113 @@ export default function Index() {
   const [notification, setNotification] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [expandedTemplate, setExpandedTemplate] = useState<number | null>(null);
+  const [savingTemplate, setSavingTemplate] = useState<number | null>(null);
+  const [localTemplates, setLocalTemplates] = useState<Record<number, TemplateSection[]>>({});
+
+  const loadTemplates = async () => {
+    setTemplatesLoading(true);
+    try {
+      const res = await fetch(TEMPLATES_URL);
+      const data: Template[] = await res.json();
+      setTemplates(data);
+      const local: Record<number, TemplateSection[]> = {};
+      data.forEach(t => { local[t.id] = t.sections; });
+      setLocalTemplates(local);
+    } catch {
+      notify('Ошибка загрузки шаблонов', 'err');
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  useEffect(() => { loadTemplates(); }, []);
+
+  const saveTemplate = async (templateId: number) => {
+    setSavingTemplate(templateId);
+    try {
+      await fetch(TEMPLATES_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template_id: templateId, sections: localTemplates[templateId] ?? [] }),
+      });
+      notify('Шаблон сохранён');
+    } catch {
+      notify('Ошибка сохранения', 'err');
+    } finally {
+      setSavingTemplate(null);
+    }
+  };
+
+  const applyTemplate = (templateId: number) => {
+    const tmpl = templates.find(t => t.id === templateId);
+    if (!tmpl) return;
+    const newSections: IniSection[] = (localTemplates[templateId] ?? []).map(s => ({
+      id: generateId(),
+      name: s.name,
+      params: s.params.map(p => ({ id: generateId(), key: p.key, value: p.value, comment: p.comment })),
+    }));
+    if (newSections.length === 0) newSections.push({ id: generateId(), name: 'General', params: [] });
+    setSections(newSections);
+    setActiveSection(newSections[0].id);
+    setTab('editor');
+    notify(`Шаблон применён: ${tmpl.name}`);
+  };
+
+  const updateLocalSection = (templateId: number, secIdx: number, field: 'name', value: string) => {
+    setLocalTemplates(prev => {
+      const secs = [...(prev[templateId] ?? [])];
+      secs[secIdx] = { ...secs[secIdx], [field]: value };
+      return { ...prev, [templateId]: secs };
+    });
+  };
+
+  const updateLocalParam = (templateId: number, secIdx: number, paramIdx: number, field: keyof TemplateParam, value: string) => {
+    setLocalTemplates(prev => {
+      const secs = [...(prev[templateId] ?? [])];
+      const params = [...secs[secIdx].params];
+      params[paramIdx] = { ...params[paramIdx], [field]: value };
+      secs[secIdx] = { ...secs[secIdx], params };
+      return { ...prev, [templateId]: secs };
+    });
+  };
+
+  const addLocalSection = (templateId: number) => {
+    setLocalTemplates(prev => ({
+      ...prev,
+      [templateId]: [...(prev[templateId] ?? []), { id: 0, name: 'NewSection', params: [] }],
+    }));
+  };
+
+  const removeLocalSection = (templateId: number, secIdx: number) => {
+    setLocalTemplates(prev => {
+      const secs = [...(prev[templateId] ?? [])];
+      secs.splice(secIdx, 1);
+      return { ...prev, [templateId]: secs };
+    });
+  };
+
+  const addLocalParam = (templateId: number, secIdx: number) => {
+    setLocalTemplates(prev => {
+      const secs = [...(prev[templateId] ?? [])];
+      const params = [...secs[secIdx].params, { id: 0, comment: '', key: '', value: '' }];
+      secs[secIdx] = { ...secs[secIdx], params };
+      return { ...prev, [templateId]: secs };
+    });
+  };
+
+  const removeLocalParam = (templateId: number, secIdx: number, paramIdx: number) => {
+    setLocalTemplates(prev => {
+      const secs = [...(prev[templateId] ?? [])];
+      const params = [...secs[secIdx].params];
+      params.splice(paramIdx, 1);
+      secs[secIdx] = { ...secs[secIdx], params };
+      return { ...prev, [templateId]: secs };
+    });
+  };
 
   const notify = (text: string, type: 'ok' | 'err' = 'ok') => {
     setNotification({ text, type });
@@ -281,6 +409,138 @@ export default function Index() {
                   className="w-full bg-muted border border-border px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
                   style={{ fontFamily: "'IBM Plex Mono', monospace" }}
                 />
+              </div>
+
+              {/* TEMPLATES BLOCK */}
+              <div className="border border-border p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+                    <Icon name="LayoutTemplate" size={12} />
+                    Шаблоны
+                  </div>
+                  {templatesLoading && <span className="text-xs text-muted-foreground" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>загрузка...</span>}
+                </div>
+                <p className="text-xs text-muted-foreground">Выберите готовый шаблон и настройте его перед применением</p>
+
+                <div className="space-y-2">
+                  {templates.map(tmpl => {
+                    const isOpen = expandedTemplate === tmpl.id;
+                    const secs = localTemplates[tmpl.id] ?? [];
+                    return (
+                      <div key={tmpl.id} className="border border-border">
+                        {/* Template header */}
+                        <div className="flex items-center justify-between px-3 py-2 hover:bg-muted/30 transition-colors">
+                          <button
+                            onClick={() => setExpandedTemplate(isOpen ? null : tmpl.id)}
+                            className="flex items-center gap-2 flex-1 text-left"
+                          >
+                            <Icon name={isOpen ? 'ChevronDown' : 'ChevronRight'} size={12} className="text-muted-foreground shrink-0" />
+                            <span className="text-xs text-foreground" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{tmpl.name}</span>
+                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => saveTemplate(tmpl.id)}
+                              disabled={savingTemplate === tmpl.id}
+                              title="Сохранить шаблон"
+                              className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground border border-border hover:border-primary hover:text-primary transition-colors disabled:opacity-40"
+                              style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              <Icon name="Save" size={11} />
+                              {savingTemplate === tmpl.id ? '...' : 'сохранить'}
+                            </button>
+                            <button
+                              onClick={() => applyTemplate(tmpl.id)}
+                              title="Применить шаблон в редактор"
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                              style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              <Icon name="Play" size={11} />
+                              применить
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Expanded editor */}
+                        {isOpen && (
+                          <div className="border-t border-border">
+                            {secs.map((sec, secIdx) => (
+                              <div key={secIdx} className="border-b border-border/50 last:border-b-0">
+                                {/* Section name */}
+                                <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/20">
+                                  <span className="text-muted-foreground text-xs" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>[</span>
+                                  <input
+                                    value={sec.name}
+                                    onChange={e => updateLocalSection(tmpl.id, secIdx, 'name', e.target.value)}
+                                    className="flex-1 bg-transparent text-xs text-foreground focus:outline-none"
+                                    style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                                  />
+                                  <span className="text-muted-foreground text-xs" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>]</span>
+                                  <button onClick={() => removeLocalSection(tmpl.id, secIdx)} className="text-muted-foreground hover:text-destructive transition-colors">
+                                    <Icon name="X" size={11} />
+                                  </button>
+                                </div>
+                                {/* Column headers */}
+                                <div className="grid grid-cols-[1fr_1fr_1fr_24px] px-3 py-1 border-b border-border/30">
+                                  {['; comment', 'key', 'value', ''].map((h, i) => (
+                                    <span key={i} className="text-xs text-muted-foreground/60" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{h}</span>
+                                  ))}
+                                </div>
+                                {/* Params */}
+                                {sec.params.map((param, paramIdx) => (
+                                  <div key={paramIdx} className="grid grid-cols-[1fr_1fr_1fr_24px] px-3 border-b border-border/20 last:border-b-0 hover:bg-muted/10 group">
+                                    <input
+                                      value={param.comment}
+                                      onChange={e => updateLocalParam(tmpl.id, secIdx, paramIdx, 'comment', e.target.value)}
+                                      placeholder="комментарий"
+                                      className="bg-transparent text-xs text-muted-foreground py-1.5 pr-2 focus:outline-none placeholder:text-muted-foreground/25 w-full"
+                                      style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                                    />
+                                    <input
+                                      value={param.key}
+                                      onChange={e => updateLocalParam(tmpl.id, secIdx, paramIdx, 'key', e.target.value)}
+                                      placeholder="key"
+                                      className="bg-transparent text-xs text-foreground py-1.5 px-2 border-l border-border/30 focus:outline-none placeholder:text-muted-foreground/30 w-full"
+                                      style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                                    />
+                                    <input
+                                      value={param.value}
+                                      onChange={e => updateLocalParam(tmpl.id, secIdx, paramIdx, 'value', e.target.value)}
+                                      placeholder="value"
+                                      className="bg-transparent text-xs text-primary py-1.5 px-2 border-l border-border/30 focus:outline-none placeholder:text-muted-foreground/30 w-full"
+                                      style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                                    />
+                                    <button
+                                      onClick={() => removeLocalParam(tmpl.id, secIdx, paramIdx)}
+                                      className="flex items-center justify-center text-transparent group-hover:text-muted-foreground hover:!text-destructive transition-all"
+                                    >
+                                      <Icon name="Trash2" size={10} />
+                                    </button>
+                                  </div>
+                                ))}
+                                {/* Add param */}
+                                <button
+                                  onClick={() => addLocalParam(tmpl.id, secIdx)}
+                                  className="w-full flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+                                  style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                                >
+                                  <Icon name="Plus" size={10} /> добавить параметр
+                                </button>
+                              </div>
+                            ))}
+                            {/* Add section */}
+                            <button
+                              onClick={() => addLocalSection(tmpl.id)}
+                              className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-primary border-t border-border/30 transition-colors"
+                              style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              <Icon name="Plus" size={10} /> добавить секцию
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
             </div>
